@@ -1,0 +1,20 @@
+# torch / torchvision are installed separately (CPU wheels) in docker/Dockerfile
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.34,<0.35
+pydantic>=2.10,<3
+pydantic-settings>=2.7,<3
+openai>=1.58,<2
+langgraph>=0.2.60,<0.4
+qdrant-client>=1.12,<1.14
+sentence-transformers>=3.3,<4
+rank-bm25>=0.2.2,<0.3
+redis>=5.2,<6
+asyncpg>=0.30,<0.31
+prometheus-client>=0.21,<0.22
+PyJWT>=2.10,<3
+cryptography>=44,<46
+python-multipart>=0.0.20
+pillow>=11,<12
+numpy>=1.26,<2.2
+opencv-python-headless>=4.10,<4.11
+spacy>=3.8,<3.9

@@ -1,0 +1,88 @@
+# Run from repo root:  docker compose --env-file .env -f docker/docker-compose.yml up --build -d
+name: novamesh
+services:
+  novamesh-core:
+    build: { context: .., dockerfile: docker/Dockerfile }
+    restart: unless-stopped
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:?set GROQ_API_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      AES_KEY_B64: ${AES_KEY_B64:?set AES_KEY_B64}
+      BOOTSTRAP_ADMIN_USER: ${BOOTSTRAP_ADMIN_USER:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD}
+      GROQ_PRIMARY_MODEL: ${GROQ_PRIMARY_MODEL:-llama-3.3-70b-versatile}
+      GROQ_FALLBACK_MODEL: ${GROQ_FALLBACK_MODEL:-llama-3.1-8b-instant}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis-broker:6379/0
+      POSTGRES_DSN: postgresql://novamesh:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres-ledger:5432/novamesh
+      QDRANT_URL: http://qdrant-db:6333
+      CRAG_THRESHOLD: ${CRAG_THRESHOLD:-0.75}
+      CONSENSUS_THRESHOLD: ${CONSENSUS_THRESHOLD:-0.66}
+      VALIDATOR_COUNT: ${VALIDATOR_COUNT:-5}
+      VISION_ANOMALY_THRESHOLD: ${VISION_ANOMALY_THRESHOLD:-0.80}
+      VISION_WARMUP_FRAMES: ${VISION_WARMUP_FRAMES:-30}
+      RTSP_ALLOWED_HOSTS: ${RTSP_ALLOWED_HOSTS:-}
+    volumes: [model-cache:/home/novamesh/.cache]
+    depends_on:
+      redis-broker: { condition: service_healthy }
+      postgres-ledger: { condition: service_healthy }
+      qdrant-db: { condition: service_healthy }
+    deploy: { resources: { limits: { memory: 4g } } }
+    networks: [mesh]
+
+  qdrant-db:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes: [qdrant-data:/qdrant/storage]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mesh]
+
+  redis-broker:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment: { REDIS_PASSWORD: "${REDIS_PASSWORD:?set REDIS_PASSWORD}" }
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mesh]
+
+  postgres-ledger:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: novamesh
+      POSTGRES_DB: novamesh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novamesh -d novamesh"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [mesh]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prom-data:/prometheus"]
+    ports: ["127.0.0.1:9090:9090"]
+    depends_on:
+      novamesh-core: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [mesh]
+
+volumes: { model-cache: {}, qdrant-data: {}, redis-data: {}, pg-data: {}, prom-data: {} }
+networks: { mesh: {} }
